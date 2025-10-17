@@ -13,16 +13,22 @@ class SimpleHTMLParser(HTMLParser):
         self.in_title = False
         self.current_tag = None
         self.skip_tags = {'script', 'style', 'meta', 'link', 'iframe'}
+        self.headers = []
+        self.in_header = False
 
     def handle_starttag(self, tag, attrs):
         self.current_tag = tag
         if tag == 'title':
             self.in_title = True
+        elif tag in {'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}:
+            self.in_header = True
 
     def handle_endtag(self, tag):
         self.current_tag = None
         if tag == 'title':
             self.in_title = False
+        elif tag in {'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}:
+            self.in_header = False
 
     def handle_data(self, data):
         if self.current_tag not in self.skip_tags:
@@ -30,6 +36,8 @@ class SimpleHTMLParser(HTMLParser):
             if text:
                 if self.in_title:
                     self.title = text
+                elif self.in_header:
+                    self.headers.append(text)
                 else:
                     self.text.append(text)
 
@@ -37,127 +45,95 @@ def clean_html_content(html_content):
     parser = SimpleHTMLParser()
     parser.feed(html_content)
     
-    # Format the extracted content
+    # Format the extracted content in a clear, structured way
     result = []
-    if parser.title:
-        result.append(f"Title: {parser.title}\n")
     
-    result.append("Content:")
-    result.extend(parser.text)
+    if parser.title:
+        result.append(f"Başlık (Title): {parser.title}\n")
+    
+    if parser.headers:
+        result.append("Sayfa Başlıkları (Headers):")
+        for header in parser.headers:
+            result.append(f"  - {header}")
+        result.append("")
+    
+    result.append("Sayfa İçeriği (Content):")
+    # Group text into meaningful paragraphs
+    current_paragraph = []
+    for text in parser.text:
+        if len(text) < 3:  # Skip very short fragments
+            continue
+        if text.endswith(('.', '!', '?', ':', '"')) or len(text) > 100:
+            current_paragraph.append(text)
+            if current_paragraph:
+                result.append("  " + " ".join(current_paragraph))
+                current_paragraph = []
+        else:
+            current_paragraph.append(text)
+    
+    if current_paragraph:
+        result.append("  " + " ".join(current_paragraph))
     
     return "\n".join(result)
 
 def run_scraper(url):
-    # Path discovery: try C# headful CLI first (CSharpApp.exe), then C++ scraper (cpp_app.exe)
-    # Discover repository root by walking up until we find 'src' or solution file
-    cur = os.path.abspath(os.path.dirname(__file__))
-    repo_root = cur
-    while True:
-        if os.path.exists(os.path.join(repo_root, 'src')) or any(fname.endswith('.sln') for fname in os.listdir(repo_root)):
-            break
-        parent = os.path.dirname(repo_root)
-        if parent == repo_root:
-            break
-        repo_root = parent
+    # Only look in the same directory as the coordinator
+    package_dir = os.path.abspath(os.path.dirname(__file__))
+    
+    # Look for executables in the same directory
+    csharp_path = os.path.join(package_dir, 'CSharpApp.exe')
+    cpp_path = os.path.join(package_dir, 'cpp_app.exe')
 
-    # C# CLI candidates relative to repo root
-    csharp_candidates = [
-        os.path.join(repo_root, 'bin', 'cs', 'CSharpApp.exe'),
-        os.path.join(repo_root, 'bin', 'CSharpApp.exe'),
-        os.path.join(repo_root, 'src', 'cs', 'bin', 'Release', 'CSharpApp.exe'),
-    ]
-
-    csharp_path = next((c for c in csharp_candidates if os.path.exists(c)), None)
-
-    # C++ scraper candidates (fallback)
-    cpp_candidates = [
-        os.path.join(repo_root, 'bin', 'package', 'cpp_app.exe'),
-        os.path.join(repo_root, 'build', 'bin', 'Release', 'cpp_app.exe'),
-        os.path.join(repo_root, 'src', 'cpp', 'cpp_app.exe'),
-        os.path.join(repo_root, 'bin', 'package', 'cpp_app.exe')
-    ]
-
-    cpp_path = next((c for c in cpp_candidates if os.path.exists(c)), None)
-
-    # Final fallback: working dir and package dir
-    if csharp_path is None:
-        for root in [os.getcwd(), os.path.join(repo_root, 'bin', 'package')]:
-            p = os.path.join(root, 'CSharpApp.exe')
-            if os.path.exists(p):
-                csharp_path = p
-                break
-
-    if cpp_path is None:
-        for root in [os.getcwd(), os.path.join(repo_root, 'bin', 'package')]:
-            p = os.path.join(root, 'cpp_app.exe')
-            if os.path.exists(p):
-                cpp_path = p
-                break
-
-    print(f"C# candidates: {csharp_candidates}", file=sys.stderr)
-    print(f"Selected C# path: {csharp_path}", file=sys.stderr)
-    print(f"C++ candidates: {cpp_candidates}", file=sys.stderr)
-    print(f"Selected C++ path: {cpp_path}", file=sys.stderr)
+    print(f"Looking for executables in: {package_dir}", file=sys.stderr)
+    print(f"C# path: {csharp_path} (exists: {os.path.exists(csharp_path)})", file=sys.stderr)
+    print(f"C++ path: {cpp_path} (exists: {os.path.exists(cpp_path)})", file=sys.stderr)
     
     try:
-        # Use previously discovered csharp_path / cpp_path
-        output = ""
-        error = ""
-
-        if csharp_path:
-            print(f"Using C# headful capture: {csharp_path}", file=sys.stderr)
-            process = subprocess.Popen([csharp_path, "--capture-url", url],
-                                       stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE,
-                                       text=True,
-                                       cwd=os.path.dirname(csharp_path))
-            out_text, err_text = process.communicate()
-            output = out_text or ""
-            error = err_text or ""
-            if process.returncode != 0:
-                return {
-                    "success": False,
-                    "error": error or "C# capture failed"
-                }
-        else:
-            # Run the C++ scraper
-            if cpp_path is None:
-                raise FileNotFoundError("No C++ scraper found to run")
+        # Decide which tool to run
+        if csharp_path is not None:
+            print(f"Invoking C# headful capture: {csharp_path}", file=sys.stderr)
+            cmd = [csharp_path, '--capture-url', url]
+            cwd = os.path.dirname(csharp_path)
+        elif cpp_path is not None:
             print(f"Invoking C++ scraper: {cpp_path}", file=sys.stderr)
-            # Use binary mode to avoid UnicodeDecodeError when scraper emits binary data
-            process = subprocess.Popen([cpp_path, url],
-                                       stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE,
-                                       text=False,
-                                       cwd=os.path.dirname(cpp_path))  # Set working directory to exe location
+            cmd = [cpp_path, url]
+            cwd = os.path.dirname(cpp_path)
+        else:
+            raise FileNotFoundError("No scraper or headful capture executable found")
 
-            out_bytes, err_bytes = process.communicate()
-            # Decode bytes defensively
-            if out_bytes is None:
-                output = ""
-            else:
-                try:
-                    output = out_bytes.decode('utf-8')
-                except Exception:
-                    output = out_bytes.decode('utf-8', errors='replace')
+        # Use binary mode to avoid UnicodeDecodeError when scraper emits binary data
+        process = subprocess.Popen(cmd,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE,
+                                   text=False,
+                                   cwd=cwd)  # Set working directory to exe location
 
-            if err_bytes is None:
-                error = ""
-            else:
-                try:
-                    error = err_bytes.decode('utf-8')
-                except Exception:
-                    error = err_bytes.decode('utf-8', errors='replace')
+        out_bytes, err_bytes = process.communicate()
+        # Decode bytes defensively
+        if out_bytes is None:
+            output = ""
+        else:
+            try:
+                output = out_bytes.decode('utf-8')
+            except Exception:
+                output = out_bytes.decode('utf-8', errors='replace')
 
-            # Debug prints
-            print(f"Scraper stdout (truncated): {output[:2000]!r}", file=sys.stderr)  # Debug output (truncated)
-            print(f"Scraper stderr (truncated): {error[:2000]!r}", file=sys.stderr)    # Debug output (truncated)
+        if err_bytes is None:
+            error = ""
+        else:
+            try:
+                error = err_bytes.decode('utf-8')
+            except Exception:
+                error = err_bytes.decode('utf-8', errors='replace')
 
-            if process.returncode != 0:
-                return {
-                    "success": False,
-                    "error": error or "Failed to scrape the URL"
-                }
+        print(f"Scraper stdout (truncated): {output[:1000]!r}", file=sys.stderr)  # Debug output (truncated)
+        print(f"Scraper stderr (truncated): {error[:1000]!r}", file=sys.stderr)    # Debug output (truncated)
+
+        if process.returncode != 0:
+            return {
+                "success": False,
+                "error": error or "Failed to scrape the URL"
+            }
 
         if not output.strip():
             return {
