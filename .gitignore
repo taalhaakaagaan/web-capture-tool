@@ -1,0 +1,39 @@
+# Build results
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+build/
+
+# Visual Studio files
+.vs/
+*.user
+*.suo
+*.sln.docstates
+*.userprefs
+
+# Test Results
+**/screenshots/*.png
+**/screenshots/*.json
+temp_*.json
+temp_*.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Dependencies
+node_modules/
+packages/
+*.nupkg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# Logs
+*.log
